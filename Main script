@@ -1,0 +1,44 @@
+:local targetList "Blacklist";
+
+# Получаем логи - исправленный синтаксис find
+:local logList [/log find where topics~"system" && message~"login failure"];
+:local logCount [:len $logList];
+
+# Ограничиваем количество записей (берем последние 100)
+:if ($logCount > 100) do={
+    :set logList [:pick $logList ($logCount - 100) $logCount];
+}
+
+:foreach i in=$logList do={
+    :local msg [/log get $i message];
+    
+    # Ищем позицию "from "
+    :local fromPos [:find $msg "from "];
+    
+    :if ([:typeof $fromPos] != "nil") do={  # Исправлено: проверка на nil вместо ""
+        # Вырезаем строку после "from "
+        :local ipStr [:pick $msg ($fromPos + 5) [:len $msg]];
+        
+        # Обрезаем пробелы или порт, если есть
+        :local spacePos [:find $ipStr " "];
+        :if ([:typeof $spacePos] != "nil") do={  # Исправлено: проверка на nil
+            :set ipStr [:pick $ipStr 0 $spacePos];
+        }
+        
+        # Проверяем, что это похоже на IP (содержит точку)
+        :if ([:find $ipStr "."] >= 0) do={  # Исправлено: проверка на >= 0 вместо != ""
+            # Пытаемся преобразовать в IP-адрес
+            :do {
+                :local ipAddr [:toip $ipStr];
+                
+                # Проверяем наличие в списке
+                :if ([/ip firewall address-list find where list=$targetList address=$ipAddr] = "") do={
+                    /ip firewall address-list add address=$ipAddr list=$targetList timeout=3d comment="Banned via Log";
+                    :log warning ("BANNED IP FROM LOG: " . $ipAddr);
+                }
+            } on-error={
+                # Если преобразование в IP не удалось, игнорируем
+            }
+        }
+    }
+}
